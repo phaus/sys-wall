@@ -1,0 +1,32 @@
+[package]
+name = "sys-wall"
+version = "0.1.0"
+edition = "2021"
+description = "A tabbed TUI system dashboard for Linux framebuffer consoles"
+license = "MIT"
+
+[[bin]]
+name = "sys-wall"
+path = "src/main.rs"
+
+[lib]
+name = "sys_wall"
+path = "src/lib.rs"
+
+[dependencies]
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+sysinfo = "0.33"
+toml = "0.8"
+# nix = { version = "0.29", features = ["ioctl", "hostname"] }
+qrcode = "0.14"
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+thiserror = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
