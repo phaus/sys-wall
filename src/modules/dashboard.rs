@@ -1,15 +1,21 @@
 use crate::{Module, ModuleCapability, WidgetSize, SystemContext};
 use crossterm::event::{Event, KeyCode};
+use ratatui::prelude::{Color, Line, Margin, Span, Style, Stylize, Text};
+use ratatui::widgets::{Block, BorderType, Borders};
 
 /// The Dashboard module serves as the default landing page.
+/// Renders a compact system summary (hostname, MAC) on the widget, with a
+/// styled page header when selected.
 pub struct DashboardModule {
-    pub title: String,
+    hostname: String,
+    primary_mac: String,
 }
 
 impl DashboardModule {
     pub fn new() -> Self {
         Self {
-            title: "sys-wall".to_string(),
+            hostname: "unknown".to_string(),
+            primary_mac: "n/a".to_string(),
         }
     }
 }
@@ -22,11 +28,11 @@ impl Default for DashboardModule {
 
 impl Module for DashboardModule {
     fn name(&self) -> &str {
-        &self.title
+        "Dashboard"
     }
 
     fn keybinding(&self) -> Option<KeyCode> {
-        Some(KeyCode::F(1))
+        Some(KeyCode::Char('1'))
     }
 
     fn capability(&self) -> ModuleCapability {
@@ -37,41 +43,70 @@ impl Module for DashboardModule {
         WidgetSize::Small
     }
 
-    fn update(&mut self, _ctx: &SystemContext) -> Result<(), Box<dyn std::error::Error>> {
+    fn update(&mut self, ctx: &SystemContext) -> Result<(), Box<dyn std::error::Error>> {
+        self.hostname = ctx.hostname.clone();
+        self.primary_mac = ctx.primary_mac.clone();
         Ok(())
     }
 
     fn render_widget(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
-        use ratatui::prelude::Color;
-
-        let text = ratatui::text::Line::from(ratatui::text::Span::styled(
-            format!(" {} ", self.title),
-            ratatui::style::Style::default().fg(Color::Magenta),
-        ));
-        let block = ratatui::widgets::Block::default()
-            .title(text)
-            .border_type(ratatui::widgets::BorderType::Plain)
-            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::Gray));
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    self.hostname.as_str(),
+                    Style::default().fg(Color::Magenta).bold(),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "mac  ",
+                    Style::default().fg(Color::Cyan).bold(),
+                ),
+                Span::styled(
+                    self.primary_mac.as_str(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+        ];
+        let text = Text::from(lines);
+        let block = Block::default()
+            .title(format!(" {} ", "sys-wall"))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Magenta));
         frame.render_widget(block, area);
+        frame.render_widget(
+            text,
+            area.inner(Margin {
+                vertical: 0,
+                horizontal: 1,
+            }),
+        );
     }
 
     fn render_page(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
-        use ratatui::prelude::{Stylize, Color, Alignment};
+        use ratatui::prelude::Alignment;
 
-        let text = ratatui::text::Line::from(ratatui::text::Span::styled(
-            " sys-wall - System Dashboard ".to_string(),
-            ratatui::style::Style::default()
-                .fg(Color::Green)
-                .bold(),
-        ));
-        let block = ratatui::widgets::Block::default()
-            .title_bottom(text)
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .title_alignment(Alignment::Center);
+        let block = Block::default()
+            .title_top(
+                Line::from(vec![
+                    Span::raw("   "),
+                    Span::styled(
+                        " sys-wall ".to_string(),
+                        Style::default().fg(Color::Green).bold(),
+                    ),
+                ])
+                .alignment(Alignment::Center),
+            )
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Gray));
         frame.render_widget(block, area);
     }
 
-    fn handle_input(&mut self, _event: &Event) -> Result<bool, Box<dyn std::error::Error>> {
+    fn handle_input(
+        &mut self,
+        _event: &Event,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         Ok(false)
     }
 }

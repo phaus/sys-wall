@@ -1,6 +1,6 @@
 use sys_wall::config::Config;
 use sys_wall::modules;
-use sys_wall::{Module, ModuleCapability};
+use sys_wall::{Module, ModuleCapability, WidgetSize};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -13,6 +13,30 @@ use std::io;
 
 const TICK_RATE_MS: u64 = 1000;
 
+/// Widget height for a given WidgetSize.
+fn widget_height(size: WidgetSize) -> u16 {
+    match size {
+        WidgetSize::Small => 5,
+        WidgetSize::Medium => 8,
+        WidgetSize::Large => 12,
+    }
+}
+
+/// Get the list of (index, name) tuples for page-capable modules.
+fn page_module_list(modules: &[std::boxed::Box<dyn Module>]) -> Vec<(usize, String)> {
+    modules
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| {
+            matches!(
+                m.capability(),
+                ModuleCapability::WidgetAndPage | ModuleCapability::PageOnly
+            )
+        })
+        .map(|(i, m)| (i, m.name().to_string()))
+        .collect()
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::load()?;
     enable_raw_mode()?;
@@ -22,7 +46,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut modules = modules::register_modules();
-    let mut current_tab: usize = 0;
+
+    // Build a static list of page names (used only for keyboard switching)
+    let page_names: Vec<String> = {
+        let list = page_module_list(&modules);
+        list.into_iter().map(|(_, nm)| nm).collect()
+    };
+    let page_count = page_names.len();
+
+    let mut current_page: usize = 0;
 
     loop {
         let ctx = sys_wall::SystemContext::new(config.clone());
@@ -32,18 +64,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         terminal.draw(|frame| {
-    let area = frame.area();
+            let area = frame.area();
+            let tab_y = area.height.saturating_sub(1);
+            let main_area = ratatui::layout::Rect::new(0, 0, area.width, tab_y);
 
-            // Render active page
-            let page_idx = current_tab;
-            for (i, module) in modules.iter().enumerate() {
-                if i == page_idx {
-                    module.render_page(frame, area);
+            // Render all widgets as a grid on the Dashboard page
+            let widget_modules: Vec<_> = modules
+                .iter()
+                .filter(|m| {
+                    matches!(
+                        m.capability(),
+                        ModuleCapability::WidgetAndPage | ModuleCapability::PageOnly | ModuleCapability::WidgetOnly
+                    )
+                })
+                .map(|m| m.as_ref())
+                .collect();
+
+            if !widget_modules.is_empty() {
+                let mut widgets_per_row: u16 = 1;
+                if main_area.width >= 46 {
+                    widgets_per_row = main_area.width / 46;
+                    if widgets_per_row > 4 {
+                        widgets_per_row = 4;
+                    }
+                }
+
+                let mut row_heights: Vec<u16> = Vec::new();
+                let mut idx: u16 = 0;
+                while idx < widget_modules.len() as u16 {
+                    let mut max_h: u16 = 0;
+                    for _ in 0..widgets_per_row {
+                        if idx < widget_modules.len() as u16 {
+                            let h = widget_height(widget_modules[idx as usize].widget_size());
+                            if h > max_h {
+                                max_h = h.max(4);
+                            }
+                            idx += 1;
+                        }
+                    }
+                    row_heights.push(max_h.max(4));
+                }
+
+                let layout = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints(
+                        row_heights
+                            .iter()
+                            .map(|h| ratatui::layout::Constraint::Length(*h))
+                            .collect::<Vec<_>>(),
+                    );
+
+                let regions = layout.split(main_area);
+
+                let mut cell: u16 = 0;
+                for region in regions.iter() {
+                    for col in 0..widgets_per_row {
+                        if cell < widget_modules.len() as u16 {
+                            let cell_w = region.width / widgets_per_row;
+                            let cell_area = ratatui::layout::Rect::new(
+                                region.left() + col * cell_w,
+                                region.top(),
+                                cell_w.max(1),
+                                region.height.max(1),
+                            );
+                            widget_modules[cell as usize].render_widget(frame, cell_area);
+                            cell += 1;
+                        }
+                    }
                 }
             }
 
-            // Render tab bar at bottom
-            render_tabs(frame, &modules, current_tab);
+            // Render simplified tab bar
+            render_tab_bar(frame, &page_names, current_page);
         })?;
 
         if event::poll(std::time::Duration::from_millis(TICK_RATE_MS))? {
@@ -56,17 +148,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             terminal.show_cursor()?;
                             return Ok(());
                         }
-                        KeyCode::F(1) => {
-                            current_tab = 0;
-                        }
-                        _ => {
-                            if let KeyCode::F(key_num) = key.code {
-                                let tab_num = key_num as usize;
-                                if tab_num >= 2 && tab_num <= modules.len() + 1 {
-                                    current_tab = tab_num - 2;
-                                }
+                        KeyCode::Char('1') => {
+                            if page_count > 0 {
+                                current_page = 0;
                             }
                         }
+                        KeyCode::Char('2') => {
+                            if page_count > 1 {
+                                current_page = 1;
+                            }
+                        }
+                        KeyCode::Char('3') => {
+                            if page_count > 2 {
+                                current_page = 2;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -74,35 +171,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn render_tabs<'a>(
+fn render_tab_bar<'a>(
     frame: &mut ratatui::Frame<'a>,
-    modules: &[std::boxed::Box<dyn Module>],
-    current_tab: usize,
+    page_names: &[String],
+    current_page: usize,
 ) {
     let area = frame.area();
     let tab_y = area.height.saturating_sub(1);
 
-    let mut spans: Vec<_> = Vec::new();
-    spans.push(ratatui::text::Span::raw("[Dashboard]---"));
+    if page_names.is_empty() {
+        return;
+    }
 
-    for (i, module) in modules.iter().enumerate() {
-        if module.capability() != ModuleCapability::WidgetOnly {
-            let is_active = i == current_tab;
-            let key = ((i as u8) + 2) as char;
-            let text = format!("[F{}:{}] ", key, module.name());
-            let tab_span = if is_active {
-                ratatui::text::Span::styled(
-                    text,
-                    ratatui::style::Style::default()
-                        .fg(ratatui::style::Color::Yellow)
-                        .bold(),
-                )
-            } else {
-                ratatui::text::Span::raw(text)
-            };
-            spans.push(tab_span);
-            spans.push(ratatui::text::Span::raw("---"));
-        }
+    let mut spans: Vec<_> = Vec::new();
+    spans.push(ratatui::text::Span::styled(
+        " sys-wall ",
+        ratatui::style::Style::default()
+            .fg(ratatui::style::Color::Yellow)
+            .bold(),
+    ));
+    spans.push(ratatui::text::Span::raw(" | "));
+
+    for (i, name) in page_names.iter().enumerate() {
+        let is_active = i == current_page;
+        let key = (i as u8) + 1;
+        let text = format!("[{key}:{}] ", name.as_str());
+        let tab_span = if is_active {
+            ratatui::text::Span::styled(
+                text,
+                ratatui::style::Style::default()
+                    .fg(ratatui::style::Color::Green)
+                    .bold(),
+            )
+        } else {
+            ratatui::text::Span::raw(text)
+        };
+        spans.push(tab_span);
     }
 
     let tab_line = ratatui::text::Line::from(spans);
