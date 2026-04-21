@@ -271,6 +271,82 @@ pub fn format_duration(d: Duration) -> String {
     format!("{days}d {hours}h {mins}m", days = days, hours = hours, mins = mins)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::traits::WidgetSize;
+
+    #[test]
+    fn format_duration_zero() {
+        assert_eq!(format_duration(Duration::ZERO), "0d 0h 0m");
+    }
+
+    #[test]
+    fn format_duration_seconds_only() {
+        assert_eq!(format_duration(Duration::new(45, 0)), "0d 0h 0m");
+        assert_eq!(format_duration(Duration::new(60, 0)), "0d 0h 1m");
+        assert_eq!(format_duration(Duration::new(90, 0)), "0d 0h 1m");
+        assert_eq!(format_duration(Duration::new(120, 0)), "0d 0h 2m");
+        assert_eq!(format_duration(Duration::new(3599, 0)), "0d 0h 59m");
+    }
+
+    #[test]
+    fn format_duration_minutes_only() {
+        assert_eq!(format_duration(Duration::new(3600, 0)), "0d 1h 0m");
+        assert_eq!(format_duration(Duration::new(7200, 0)), "0d 2h 0m");
+        assert_eq!(format_duration(Duration::new(3660, 0)), "0d 1h 1m");
+        assert_eq!(format_duration(Duration::new(3659, 0)), "0d 1h 0m");
+    }
+
+    #[test]
+    fn format_duration_hours_only() {
+        assert_eq!(format_duration(Duration::new(86400, 0)), "1d 0h 0m");
+        assert_eq!(format_duration(Duration::new(172800, 0)), "2d 0h 0m");
+        assert_eq!(format_duration(Duration::new(86400 + 3600, 0)), "1d 1h 0m");
+        assert_eq!(format_duration(Duration::new(86400 + 7200, 0)), "1d 2h 0m");
+    }
+
+    #[test]
+    fn format_duration_complex() {
+        let one_day = 86400u64;
+        let one_hour = 3600u64;
+        let one_minute = 60u64;
+        assert_eq!(
+            format_duration(Duration::new(one_day + one_hour + one_minute, 0)),
+            "1d 1h 1m"
+        );
+        assert_eq!(
+            format_duration(Duration::new(
+                2 * one_day + 3 * one_hour + 45 * one_minute,
+                0
+            )),
+            "2d 3h 45m"
+        );
+    }
+
+    #[test]
+    fn format_duration_large() {
+        let days_365 = 365u64 * 86400u64;
+        assert_eq!(
+            format_duration(Duration::new(days_365, 0)),
+            "365d 0h 0m"
+        );
+    }
+
+    #[test]
+    fn format_duration_partial() {
+        let secs = 86400u64 * 5 + 3600 * 2 + 60 * 30;
+        assert_eq!(format_duration(Duration::new(secs, 0)), "5d 2h 30m");
+    }
+
+    #[test]
+    fn widget_size_heights() {
+        assert_eq!(WidgetSize::Small.height(), 5);
+        assert_eq!(WidgetSize::Medium.height(), 8);
+        assert_eq!(WidgetSize::Large.height(), 14);
+    }
+}
+
 impl SystemContext {
     pub fn new(config: Config) -> Self {
         let hostname = std::fs::read_to_string("/etc/hostname")

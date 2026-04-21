@@ -398,3 +398,42 @@ impl Module for SystemInfoModule {
 fn format_memory(bytes: u64) -> String {
     format!("{:.0} MB", bytes as f64 / 1_048_576.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_memory_zero() {
+        assert_eq!(format_memory(0), "0 MB");
+    }
+
+    #[test]
+    fn format_memory_one_mb() {
+        assert_eq!(format_memory(1_048_576), "1 MB");
+    }
+
+    #[test]
+    fn format_memory_one_gb() {
+        assert_eq!(format_memory(1_073_741_824), "1024 MB");
+    }
+
+    #[test]
+    fn format_memory_small_values() {
+        assert_eq!(format_memory(1000), "0 MB");
+        assert_eq!(format_memory(500_000), "0 MB");
+        assert_eq!(format_memory(786_432), "1 MB");
+    }
+
+    #[test]
+    fn format_memory_exact_mb() {
+        assert_eq!(format_memory(2 * 1_048_576), "2 MB");
+        assert_eq!(format_memory(100 * 1_048_576), "100 MB");
+    }
+
+    #[test]
+    fn format_memory_large() {
+        let two_gb = 2 * 1_073_741_824u64;
+        assert_eq!(format_memory(two_gb), "2048 MB");
+    }
+}

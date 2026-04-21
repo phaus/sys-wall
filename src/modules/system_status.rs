@@ -132,3 +132,47 @@ impl Module for SystemStatusModule {
 fn count_users() -> usize {
     0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn format_duration_zero() {
+        assert_eq!(format_duration(Duration::ZERO), "0d 0h 0m");
+    }
+
+    #[test]
+    fn format_duration_exactly_minutes() {
+        assert_eq!(format_duration(Duration::new(60, 0)), "0d 0h 1m");
+        assert_eq!(format_duration(Duration::new(120, 0)), "0d 0h 2m");
+        assert_eq!(format_duration(Duration::new(3599, 0)), "0d 0h 59m");
+    }
+
+    #[test]
+    fn format_duration_exactly_hours() {
+        assert_eq!(format_duration(Duration::new(3600, 0)), "0d 1h 0m");
+        assert_eq!(format_duration(Duration::new(7200, 0)), "0d 2h 0m");
+    }
+
+    #[test]
+    fn format_duration_exactly_days() {
+        assert_eq!(format_duration(Duration::new(86400, 0)), "1d 0h 0m");
+        assert_eq!(format_duration(Duration::new(172800, 0)), "2d 0h 0m");
+    }
+
+    #[test]
+    fn format_duration_mixed() {
+        assert_eq!(
+            format_duration(Duration::new(86400 + 3600 + 60, 0)),
+            "1d 1h 1m"
+        );
+    }
+
+    #[test]
+    fn format_duration_365_days() {
+        let secs = 365u64 * 86400u64;
+        assert_eq!(format_duration(Duration::new(secs, 0)), "365d 0h 0m");
+    }
+}

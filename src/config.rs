@@ -85,7 +85,7 @@ impl Config {
         let current_fingerprint = Self::compute_fingerprint();
 
         // Check if fingerprint changed → regenerate UUID.
-        if Self::fingerprint_changed(&parsed_fingerprint, &current_fingerprint) {
+        if fingerprint_changed(&parsed_fingerprint, &current_fingerprint) {
             system_id = uuid::Uuid::new_v4().to_string();
             is_first_run = true;
         }
@@ -162,19 +162,143 @@ impl Config {
                 {
                     return mac.trim().to_string();
                 }
-            }
-        }
-        String::new()
+             }
+         }
+         String::new()
+     }
+}
+
+/// Check if stored fingerprint differs from current hardware fingerprint.
+fn fingerprint_changed(stored: &Option<String>, current: &str) -> bool {
+    match stored {
+        Some(s) => s != current,
+        None => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_changed_no_stored() {
+        assert!(fingerprint_changed(&None, "anything"));
     }
 
-    /// Check if stored fingerprint differs from current.
-    fn fingerprint_changed(
-        stored: &Option<String>,
-        current: &str,
-    ) -> bool {
-        match stored {
-            Some(s) => s != current,
-            None => true, // no fingerprint stored → generate new
-        }
+    #[test]
+    fn fingerprint_changed_identical_strings() {
+        assert!(!fingerprint_changed(
+            &Some("LinuxLab|00:11:22:33:44:55|5.10.0".to_string()),
+            "LinuxLab|00:11:22:33:44:55|5.10.0"
+        ));
+    }
+
+    #[test]
+    fn fingerprint_changed_different_mac() {
+        assert!(fingerprint_changed(
+            &Some("LinuxLab|00:11:22:33:44:55|5.10.0".to_string()),
+            "LinuxLab|aa:bb:cc:dd:ee:ff|5.10.0"
+        ));
+    }
+
+    #[test]
+    fn fingerprint_changed_different_kernel() {
+        assert!(fingerprint_changed(
+            &Some("LinuxLab|00:11:22:33:44:55|5.10.0".to_string()),
+            "LinuxLab|00:11:22:33:44:55|5.15.0"
+        ));
+    }
+
+    #[test]
+    fn fingerprint_changed_different_hostname() {
+        assert!(fingerprint_changed(
+            &Some("LinuxLab|00:11:22:33:44:55|5.10.0".to_string()),
+            "Server2|00:11:22:33:44:55|5.10.0"
+        ));
+    }
+
+    #[test]
+    fn config_toml_parse_system_id() {
+        let toml_str = r#"
+system_id = "abcd-1234"
+
+[general]
+refresh_interval_ms = 2000
+default_tab = "monitor"
+"#;
+        let parsed: Value = toml_str.parse().unwrap();
+        assert_eq!(
+            parsed.get("system_id").and_then(|v| v.as_str()),
+            Some("abcd-1234")
+        );
+    }
+
+    #[test]
+    fn config_toml_parse_general_section() {
+        let toml_str = r#"
+system_id = "uuid-here"
+
+[general]
+refresh_interval_ms = 5000
+default_tab = "network"
+"#;
+        let parsed: Value = toml_str.parse().unwrap();
+        let general = parsed.get("general").unwrap().as_table().unwrap();
+        let interval = general
+            .get("refresh_interval_ms")
+            .and_then(|v| v.as_integer())
+            .unwrap();
+        assert_eq!(interval, 5000);
+        let tab = general
+            .get("default_tab")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(tab, "network");
+    }
+
+    #[test]
+    fn config_toml_missing_section() {
+        let toml_str = r#"
+system_id = "test"
+"#;
+        let parsed: Value = toml_str.parse().unwrap();
+        assert!(parsed.get("general").is_none());
+        assert!(parsed
+            .get("general")
+            .and_then(|v| v.as_table())
+            .is_none());
+    }
+
+    #[test]
+    fn config_toml_missing_fingerprint() {
+        let toml_str = r#"
+system_id = "my-id"
+
+[general]
+refresh_interval_ms = 1000
+"#;
+        let parsed: Value = toml_str.parse().unwrap();
+        assert!(parsed.get("fingerprint").is_none());
+    }
+
+    #[test]
+    fn config_toml_all_fields() {
+        let toml_str = r#"
+system_id = "abcd-1234"
+fingerprint = "host|mac|5.10"
+
+[general]
+refresh_interval_ms = 3000
+default_tab = "monitor"
+"#;
+        let parsed: Value = toml_str.parse().unwrap();
+        assert_eq!(
+            parsed.get("system_id").and_then(|v| v.as_str()),
+            Some("abcd-1234")
+        );
+        assert_eq!(
+            parsed.get("fingerprint").and_then(|v| v.as_str()),
+            Some("host|mac|5.10")
+        );
     }
 }
