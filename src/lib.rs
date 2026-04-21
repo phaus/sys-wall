@@ -168,6 +168,7 @@ fn collect_dns_servers() -> Vec<String> {
 
 /// Return the MAC address of the first non-loopback interface.
 fn collect_primary_mac() -> String {
+    // Try /sys/class/net (Linux) — skip loopback and zero MACs
     if let Ok(dir) = std::fs::read_dir("/sys/class/net") {
         for entry in dir.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
@@ -175,7 +176,52 @@ fn collect_primary_mac() -> String {
                 continue;
             }
             if let Ok(mac) = std::fs::read_to_string(entry.path().join("address")) {
-                return mac.trim().to_string();
+                let mac = mac.trim().to_string();
+                if !mac.is_empty() && mac != "00:00:00:00:00:00" {
+                    return mac;
+                }
+            }
+        }
+    }
+    // Fallback Linux: parse `ip link` output
+    if let Ok(out) = std::process::Command::new("ip").arg("link").output() {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            let mut skip_lo = false;
+            for line in text.lines() {
+                if line.contains(": lo:") {
+                    skip_lo = true;
+                    continue;
+                }
+                if !line.starts_with(' ') {
+                    skip_lo = false;
+                }
+                if skip_lo {
+                    continue;
+                }
+                if let Some(pos) = line.find("link/ether ") {
+                    let mac_start = pos + "link/ether ".len();
+                    if let Some(mac) = line[mac_start..].split_whitespace().next() {
+                        if mac != "00:00:00:00:00:00" {
+                            return mac.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Fallback macOS: ifconfig en0
+    if let Ok(out) = std::process::Command::new("ifconfig").arg("en0").output() {
+        if out.status.success() {
+            let text = String::from_utf8_lossy(&out.stdout);
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("ether ") {
+                    let mac = rest.trim().to_string();
+                    if !mac.is_empty() {
+                        return mac;
+                    }
+                }
             }
         }
     }

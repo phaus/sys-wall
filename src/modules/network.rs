@@ -34,7 +34,7 @@ impl Module for NetworkModule {
     }
 
     fn keybinding(&self) -> Option<KeyCode> {
-        Some(KeyCode::Char('3'))
+        None
     }
 
     fn capability(&self) -> ModuleCapability {

@@ -63,7 +63,7 @@ impl Module for SystemInfoModule {
     }
 
     fn keybinding(&self) -> Option<KeyCode> {
-        Some(KeyCode::Char('2'))
+        Some(KeyCode::Char('3'))
     }
 
     fn capability(&self) -> ModuleCapability {

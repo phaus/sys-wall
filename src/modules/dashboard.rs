@@ -32,7 +32,7 @@ impl Module for DashboardModule {
     }
 
     fn keybinding(&self) -> Option<KeyCode> {
-        Some(KeyCode::Char('1'))
+        Some(KeyCode::Char('2'))
     }
 
     fn capability(&self) -> ModuleCapability {

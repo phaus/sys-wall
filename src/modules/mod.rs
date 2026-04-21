@@ -11,9 +11,9 @@ use crate::Module;
 
 pub fn register_modules() -> Vec<Box<dyn Module>> {
     let mut modules: Vec<Box<dyn Module>> = Vec::new();
+    modules.push(Box::new(SystemIdModule::new()));
     modules.push(Box::new(DashboardModule::new()));
     modules.push(Box::new(SystemInfoModule::new()));
     modules.push(Box::new(NetworkModule::new()));
-    modules.push(Box::new(SystemIdModule::new()));
     modules
 }
