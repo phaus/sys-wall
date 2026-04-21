@@ -55,6 +55,46 @@ impl SystemIdModule {
             .module_dimensions(1, 1)
             .build()
     }
+
+    fn render_qr_compact_lines(&self, max_cols: u16, max_rows: u16) -> Vec<String> {
+        if self.qr_url.is_empty() || max_rows == 0 || max_cols == 0 {
+            return Vec::new();
+        }
+
+        let qr = QrCode::new(self.qr_url.as_bytes()).unwrap_or_else(|_| {
+            QrCode::new(b"syswall").unwrap()
+        });
+        let colors = qr.to_colors();
+        let w = qr.width() as usize;
+        if w == 0 {
+            return Vec::new();
+        }
+
+        let mut result = Vec::new();
+        let col_step = (w as f64 / max_cols as f64).ceil() as usize;
+        let row_step = (w as f64 / max_rows as f64).ceil() as usize;
+        let max_cols = max_cols as usize;
+        let max_rows = max_rows as usize;
+
+        for row in 0..max_rows {
+            let mut line = String::with_capacity(max_cols);
+            let qr_row = row * row_step;
+            for col in 0..max_cols {
+                let qr_col = col / col_step;
+                let idx = qr_row * w + qr_col;
+                if idx < colors.len() {
+                    line.push(if colors[idx] == qrcode::types::Color::Dark {
+                        '█'
+                    } else {
+                        '░'
+                    });
+                }
+            }
+            result.push(line);
+        }
+
+        result
+    }
 }
 
 impl Default for SystemIdModule {
@@ -114,30 +154,36 @@ impl Module for SystemIdModule {
 
         let mut lines: Vec<Line<'_>> = Vec::new();
 
-        // Show system ID (truncated)
+        // Check if we should render the QR code
+        // QR needs at least 6 rows to be recognizable, width >= 25 for decent horizontal detail
+        let should_show_qr = inner.height >= 8 && inner.width >= 28;
+
+        if should_show_qr {
+            let qr_rows = inner.height.saturating_sub(4); // Reserve 4 rows for text
+            let qr_width = inner.width.saturating_sub(1);
+            if qr_rows >= 4 {
+                let qr_lines = self.render_qr_compact_lines(qr_width, qr_rows);
+                if !qr_lines.is_empty() {
+                    for qr_line in qr_lines {
+                        lines.push(Line::raw(qr_line));
+                    }
+                    lines.push(Line::raw(""));
+                }
+            }
+        }
+
+        // Show system ID and URL
         let id_display = if self.system_id.len() > 12 {
             format!("{}...", &self.system_id[..12])
         } else {
             self.system_id.clone()
         };
-        lines.push(Line::from(vec![
-            Span::styled(" ID: ", Style::default().fg(Color::Yellow).bold()),
-            Span::styled(id_display, Style::default().fg(Color::White)),
-        ]));
-
-        // Show truncated URL
         let url_display = if self.qr_url.len() > 30 {
             format!("{:.27}...", self.qr_url)
         } else {
             self.qr_url.clone()
         };
-        lines.push(Line::from(vec![
-            Span::styled(" URL: ", Style::default().fg(Color::Cyan).bold()),
-            Span::styled(url_display, Style::default().fg(Color::Blue)),
-        ]));
-
-        // Show QR generated indicator
-        lines.push(Line::raw("  QR: ok"));
+        lines.push(Line::raw(format!("  {:12}  {}", id_display, url_display)));
 
         let text = Text::from(lines);
         frame.render_widget(text, inner);
