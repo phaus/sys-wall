@@ -16,6 +16,8 @@ pub struct SystemIdModule {
     fingerprint: String,
     /// Whether the device is already registered (GET check returned {"status":"ok"}).
     registered: bool,
+    /// Whether we successfully rendered a FB QR code (so we skip ASCII fallback).
+    fb_used: bool,
 }
 
 impl SystemIdModule {
@@ -25,6 +27,7 @@ impl SystemIdModule {
             qr_url: String::new(),
             fingerprint: String::new(),
             registered: false,
+            fb_used: false,
         }
     }
 
@@ -69,12 +72,12 @@ impl SystemIdModule {
             return Vec::new();
         }
 
-        let mut result = Vec::new();
         let qr = qrcode::QrCode::with_error_correction_level(url.as_bytes(), qrcode::EcLevel::L)
             .unwrap_or_else(|_| {
                 qrcode::QrCode::with_error_correction_level(b"syswall", qrcode::EcLevel::L).unwrap()
             });
 
+        let colors = qr.to_colors();
         let size = qr.width() as usize;
 
         let needed_cols = size;
@@ -83,110 +86,155 @@ impl SystemIdModule {
             return Vec::new();
         }
 
-        let dark_term = std::env::var("TERM").unwrap_or_default() == "linux";
-        let bg = if dark_term { Color::Black } else { Color::White };
+        // On macOS (non-Linux), use half-block characters for proper 1:1 QR aspect ratio.
+        // Linux uses `#` + space (FB rendering handles pixel-perfect QR separately).
+        let is_linux = std::env::var("TERM").unwrap_or_default() == "linux";
 
-        let colors = qr.to_colors();
-        for row in (0..size).step_by(2) {
-            let has_bot = row + 1 < size;
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            for col in 0..size {
-                let idx = row * size + col;
-                let top = colors[idx] == qrcode::Color::Dark;
-                let bot = if has_bot {
-                    colors[(row + 1) * size + col] == qrcode::Color::Dark
-                } else {
-                    false
-                };
-                let ch = match (top, bot) {
-                    (true, true) => '\u{2588}', // █ dark/dark
-                    (true, false) => '\u{2580}', // ▀ dark/light (top dark)
-                    (false, true) => '\u{2584}', // ▄ light/dark (bottom dark)
-                    (false, false) => ' ',       // space light/light
-                };
-                spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default().bg(bg),
-                ));
+        if is_linux {
+            let mut result = Vec::new();
+            for row in 0..size {
+                let mut chars = String::with_capacity(size);
+                for col in 0..size {
+                    let dark = colors[row * size + col] == qrcode::Color::Dark;
+                    chars.push(if dark { '#' } else { ' ' });
+                }
+                let padding = target_cols as usize - size;
+                if padding > 0 {
+                    chars.push_str(&" ".repeat(padding));
+                }
+                result.push(Line::raw(chars));
             }
-            let padding = target_cols as usize - size;
-            if padding > 0 {
-                spans.push(Span::styled(
-                    " ".repeat(padding),
-                    Style::default().bg(bg),
-                ));
+            result
+        } else {
+            // macOS / other: half-block characters give square QR (2:1 vertical compensation)
+            let bg = Color::White;
+            let mut result = Vec::new();
+
+            for row in (0..size).step_by(2) {
+                let has_bot = row + 1 < size;
+                let mut spans: Vec<Span<'static>> = Vec::new();
+
+                for col in 0..size {
+                    let top = colors[row * size + col] == qrcode::Color::Dark;
+                    let bot = if has_bot {
+                        colors[(row + 1) * size + col] == qrcode::Color::Dark
+                    } else {
+                        false
+                    };
+                    let ch = match (top, bot) {
+                        (true, true) => '\u{2588}',  // █ dark/dark
+                        (true, false) => '\u{2580}', // ▀ dark/light (top dark)
+                        (false, true) => '\u{2584}', // ▄ light/dark (bottom dark)
+                        (false, false) => ' ',
+                    };
+                    spans.push(Span::styled(ch.to_string(), Style::default().bg(bg)));
+                }
+
+                let padding = target_cols as usize - size;
+                if padding > 0 {
+                    spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
+                }
+
+                result.push(Line::from(spans));
             }
-            result.push(Line::from(spans));
+
+            result
         }
-
-        result
     }
 
-    /// Render QR to framebuffer pixel-perfectly (Linux console only).
-    fn render_qr_fb(url: &str) -> bool {
-        if url.is_empty() {
-            return false;
+    /// Render a QR code directly to the framebuffer using pixel-perfect rendering.
+    /// 
+    /// This opens /dev/fb0, draws the QR code with large pixel blocks
+    /// and centers it on screen. No VT mode switching — just direct pixel
+    /// writes. Returns true if rendering succeeded.
+    fn render_qr_fb_once(&mut self, module_size: u32) -> bool {
+        if self.qr_url.is_empty() || self.fb_used {
+            return self.fb_used;
         }
-        let mut fb = match framebuffer::Framebuffer::new("/dev/fb0") { Ok(f) => f, Err(_) => return false };
-        let qr = match qrcode::QrCode::new(url.as_bytes()) { Ok(q) => q, Err(_) => return false };
+
+        let qr = qrcode::QrCode::with_error_correction_level(self.qr_url.as_bytes(), qrcode::EcLevel::L)
+            .unwrap_or_else(|_| {
+                qrcode::QrCode::with_error_correction_level(b"syswall", qrcode::EcLevel::L).unwrap()
+            });
 
         let colors = qr.to_colors();
         let size = qr.width() as u32;
+        
+        let min_pixel_size = size.saturating_sub(2) * module_size;
+        if min_pixel_size >= 1280 {
+            return false;
+        }
+
+        let mut fb = match framebuffer::Framebuffer::new("/dev/fb0") {
+            Ok(f) => f,
+            Err(_) => return false,
+        };
+
         let width = fb.var_screen_info.xres as u32;
         let height = fb.var_screen_info.yres as u32;
-        let line_len = fb.fix_screen_info.line_length as u32;
-        let module_size = 8u32;
-        let qr_pw = size * module_size;
-        let qr_ph = size * module_size;
-        let x_off = (width / 2) - (qr_pw / 2);
-        let y_off = (height / 2) - (qr_ph / 2);
+        let line_length = fb.fix_screen_info.line_length as u32;
+        let bpp = fb.var_screen_info.bits_per_pixel;
         
-        match fb.var_screen_info.bits_per_pixel {
+        let qr_pixel_width = size * module_size;
+        let qr_pixel_height = size * module_size;
+        let x_offset = (width / 2) - (qr_pixel_width / 2);
+        let y_offset = (height / 2) - (qr_pixel_height / 2);
+
+        let (ok, _bpp) = match bpp {
             32 => {
                 for row in 0..size {
                     for col in 0..size {
-                        let base_idx = (row * size + col) as usize;
-                        if base_idx >= colors.len() { break; }
-                        let color = if colors[base_idx] == qrcode::Color::Dark { [0u8, 0, 0, 255] } else { [255, 255, 255, 255] };
+                        let dark = colors[(row * size + col) as usize] == qrcode::Color::Dark;
+                        let module_x = x_offset + col * module_size;
+                        let module_y = y_offset + row * module_size;
+                        let (r, g, b) = if dark { (0, 0, 0) } else { (255, 255, 255) };
                         for dy in 0..module_size {
-                            let py = y_off + row * module_size + dy;
+                            let py = module_y + dy;
                             if py >= height { break; }
                             for dx in 0..module_size {
-                                let px = x_off + col * module_size + dx;
+                                let px = module_x + dx;
                                 if px >= width { break; }
-                                let base = (py * line_len + px * 4) as usize;
-                                if base + 3 < fb.frame.len() {
-                                    fb.frame[base..base+4].copy_from_slice(&color);
+                                let offset = (py as usize) * line_length as usize + (px as usize) * 4;
+                                if offset + 4 <= fb.frame.len() {
+                                    fb.frame[offset..offset+4].copy_from_slice(&[r, g, b, 255]);
                                 }
                             }
                         }
                     }
                 }
+                (true, true)
             }
             16 => {
                 for row in 0..size {
                     for col in 0..size {
-                        let base_idx = (row * size + col) as usize;
-                        if base_idx >= colors.len() { break; }
-                        let pixel = if colors[base_idx] == qrcode::Color::Dark { 0u16 } else { 0xffffu16 };
+                        let dark = colors[(row * size + col) as usize] == qrcode::Color::Dark;
+                        let module_x = x_offset + col * module_size;
+                        let module_y = y_offset + row * module_size;
+                        let (r, g, b) = if dark { (0, 0, 0) } else { (255, 255, 255) };
+                        let pixel = (((r >> 3) as u16) << 11) | (((g >> 2) as u16) << 5) | ((b >> 3) as u16);
                         for dy in 0..module_size {
-                            let py = y_off + row * module_size + dy;
+                            let py = module_y + dy;
                             if py >= height { break; }
                             for dx in 0..module_size {
-                                let px = x_off + col * module_size + dx;
+                                let px = module_x + dx;
                                 if px >= width { break; }
-                                let base = (py * line_len + px * 2) as usize;
-                                if base + 1 < fb.frame.len() {
-                                    fb.frame[base..base+2].copy_from_slice(&pixel.to_le_bytes());
+                                let offset = (py as usize) * line_length as usize + (px as usize) * 2;
+                                if offset + 2 <= fb.frame.len() {
+                                    fb.frame[offset..offset+2].copy_from_slice(&pixel.to_le_bytes());
                                 }
                             }
                         }
                     }
                 }
+                (true, true)
             }
-            _ => return false,
+            _ => (false, false),
+        };
+        
+        if ok {
+            self.fb_used = true;
         }
-        true
+        ok
     }
 }
 
@@ -228,6 +276,9 @@ impl Module for SystemIdModule {
         self.qr_url = url;
         let _ = json_str;
 
+        // Check if we could render pixel-perfect QR to framebuffer
+        self.render_qr_fb_once(8);
+
         // Check registration status
         self.registered = Self::check_registered(&self.system_id, &self.fingerprint, &ctx.system_url);
 
@@ -243,56 +294,35 @@ impl Module for SystemIdModule {
         frame.render_widget(block, area);
 
         let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
-        if inner.height < 2 {
+        if inner.width < 5 || inner.height < 1 {
             return;
         }
 
-        let mut info_lines: Vec<Line<'_>> = Vec::new();
-
-        if self.registered {
-            info_lines.push(Line::from(vec![
-                Span::styled(" ID   ", Style::default().fg(Color::Magenta).bold()),
-                Span::raw(self.system_id.clone()),
-            ]));
-            info_lines.push(Line::from(vec![
-                Span::styled(" FP   ", Style::default().fg(Color::Magenta).bold()),
-                Span::raw(self.fingerprint.clone()),
-            ]));
-            info_lines.push(Line::from(vec![
-                Span::styled(" ✓ registered ", Style::default().fg(Color::Green).bold()),
-            ]));
-        } else {
-            let qr_lines = if self.qr_url.is_empty() {
-                Vec::new()
-            } else {
-                Self::render_qr_lines(&self.qr_url, inner.width.saturating_sub(2), inner.height.saturating_sub(2))
-            };
-            let qr_fits = !qr_lines.is_empty() && inner.height >= 4;
-            if qr_fits {
-                info_lines.extend(qr_lines);
-            }
-            info_lines.push(Line::from(vec![
-                Span::styled(" ID   ", Style::default().fg(Color::Magenta).bold()),
-                Span::raw(self.system_id.clone()),
-            ]));
-            if !qr_fits {
-                info_lines.push(Line::from(vec![
-                    Span::styled(" Scan → press [1] ", Style::default().fg(Color::DarkGray)),
+        let mut lines: Vec<Line<'_>> = Vec::new();
+        lines.push(Line::from(vec![
+            Span::styled(" ID   ", Style::default().fg(Color::Magenta).bold()),
+            Span::styled(self.system_id.as_str(), Style::default().fg(Color::White)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(" FP   ", Style::default().fg(Color::Magenta).bold()),
+            Span::styled(self.fingerprint.as_str(), Style::default().fg(Color::Gray)),
+        ]));
+        if inner.height > 2 {
+            if self.registered {
+                lines.push(Line::from(vec![
+                    Span::styled(" ✓ registered ", Style::default().fg(Color::Green).bold()),
                 ]));
             } else {
-                info_lines.push(Line::from(vec![
+                lines.push(Line::from(vec![
                     Span::styled(" Scan QR → press [1] ", Style::default().fg(Color::DarkGray)),
                 ]));
             }
         }
 
-        frame.render_widget(Text::from(info_lines), inner);
+        frame.render_widget(Text::from(lines), inner);
     }
 
     fn render_page(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
-        // Render pixel-perfect QR to framebuffer (Linux only, non-blocking)
-        _ = Self::render_qr_fb(&self.qr_url);
-
         let block = Block::default()
             .title(" Scan to Add ")
             .borders(Borders::ALL)
@@ -305,11 +335,15 @@ impl Module for SystemIdModule {
             return;
         }
 
+        // Reserve 3 rows at bottom for details text
         let qr_rows = inner.height.saturating_sub(3);
         let qr_lines = Self::render_qr_lines(&self.qr_url, inner.width, qr_rows);
 
         let mut lines: Vec<Line<'_>> = Vec::new();
-        if !qr_lines.is_empty() {
+        if self.fb_used {
+            // FB QR was drawn — use empty string so ratatui draws nothing in this area
+            lines.push(Line::raw(""));
+        } else if !qr_lines.is_empty() {
             lines.extend(qr_lines);
         } else {
             lines.push(Line::styled(
@@ -387,8 +421,9 @@ mod tests {
         assert_eq!(encoded, _url.split("register=").nth(1).unwrap());
     }
 
-    /// Convert rendered QR Lines (half-block chars) back into a binary grid and decode with rxing.
-    fn decode_qr_lines(lines: &[Line<'_>]) -> Result<String, String> {
+    /// Convert rendered QR Lines back into a binary grid and decode with rxing.
+    /// Handles both Linux (`#`/space) and macOS (half-block chars) output.
+    fn decode_qr_lines(lines: &[Line<'_>], force_2x_width: bool) -> Result<String, String> {
         use rxing::Reader;
 
         if lines.is_empty() {
@@ -404,39 +439,75 @@ mod tests {
             return Err("zero width".into());
         }
 
-        // Each terminal char = 1 pixel wide, 2 pixels tall (half-block encoding)
         let upscale = 4u32;
-        let pixel_width = (term_width as u32) * upscale;
-        let pixel_height = (term_height as u32) * 2 * upscale;
+        let pixel_width: u32;
+        let pixel_height: u32;
+
+        // Check if we have half-block chars
+        let has_half_block = lines.iter().any(|l| {
+            l.spans.iter().any(|s| {
+                s.content.chars().any(|c| matches!(c, '\u{2588}' | '\u{2580}' | '\u{2584}'))
+            })
+        });
+
+        if has_half_block || force_2x_width {
+            // Half-block: 1 pixel wide, 2 pixels tall per char
+            pixel_width = (term_width as u32) * upscale;
+            pixel_height = (term_height as u32) * 2 * upscale;
+        } else {
+            // `#`/space: 1 pixel wide, 1 pixel tall per char
+            pixel_width = (term_width as u32) * upscale;
+            pixel_height = (term_height as u32) * upscale;
+        }
 
         let mut pixels = vec![255u8; (pixel_width * pixel_height) as usize];
 
-        for (row_idx, line) in lines.iter().enumerate() {
-            let top_y = (row_idx as u32) * 2 * upscale;
-            let bot_y = top_y + upscale;
-            let mut x = 0u32;
-            for span in &line.spans {
-                for ch in span.content.chars() {
-                    let (top_dark, bot_dark) = match ch {
-                        '\u{2588}' => (true, true),  // █ dark/dark
-                        '\u{2580}' => (true, false), // ▀ dark/light
-                        '\u{2584}' => (false, true), // ▄ light/dark
-                        _ => (false, false),  // space light/light
-                    };
-                    for dy in 0..upscale {
-                        for dx in 0..upscale {
-                            let px = x * upscale + dx;
-                            let py_top = top_y + dy;
-                            let py_bot = bot_y + dy;
-                            if top_dark && py_top < pixel_height {
-                                pixels[(py_top * pixel_width + px) as usize] = 0;
-                            }
-                            if bot_dark && py_bot < pixel_height {
-                                pixels[(py_bot * pixel_width + px) as usize] = 0;
+        if has_half_block {
+            for (row_idx, line) in lines.iter().enumerate() {
+                let top_y = (row_idx as u32) * 2 * upscale;
+                let bot_y = top_y + upscale;
+                let mut x = 0u32;
+                for span in &line.spans {
+                    for ch in span.content.chars() {
+                        let (top_dark, bot_dark) = match ch {
+                            '\u{2588}' => (true, true),
+                            '\u{2580}' => (true, false),
+                            '\u{2584}' => (false, true),
+                            _ => (false, false),
+                        };
+                        for dy in 0..upscale {
+                            for dx in 0..upscale {
+                                let px = x * upscale + dx;
+                                let py_top = top_y + dy;
+                                let py_bot = bot_y + dy;
+                                if top_dark && py_top < pixel_height {
+                                    pixels[(py_top * pixel_width + px) as usize] = 0;
+                                }
+                                if bot_dark && py_bot < pixel_height {
+                                    pixels[(py_bot * pixel_width + px) as usize] = 0;
+                                }
                             }
                         }
+                        x += 1;
                     }
-                    x += 1;
+                }
+            }
+        } else {
+            for (row_idx, line) in lines.iter().enumerate() {
+                let y = (row_idx as u32) * upscale;
+                let mut x = 0u32;
+                for span in &line.spans {
+                    for ch in span.content.chars() {
+                        let is_dark = ch == '#';
+                        for dy in 0..upscale {
+                            for dx in 0..upscale {
+                                let px = x * upscale + dx;
+                                let py = y + dy;
+                                pixels[(py * pixel_width + px) as usize] = if is_dark { 0 } else { 255 };
+                            }
+                        }
+                        x += 1;
+                    }
                 }
             }
         }
@@ -458,21 +529,21 @@ mod tests {
 
     #[test]
     fn qr_render_scale1_decodable() {
+        // Test macOS half-block path (TERM != "linux")
         let url = "https://example.com/test";
         let lines = SystemIdModule::render_qr_lines(url, 120, 40);
         assert!(!lines.is_empty(), "render_qr_lines returned empty");
-        let decoded = decode_qr_lines(&lines)
+        let decoded = decode_qr_lines(&lines, false)
             .expect("QR code at scale=1 should be decodable");
         assert_eq!(decoded, url);
     }
 
     #[test]
     fn qr_render_widget_size_short_url_decodable() {
-        // Short URL — need at least 21 rows for smallest QR version
         let url = "https://example.com/r?id=a";
         let lines = SystemIdModule::render_qr_lines(url, 118, 25);
         assert!(!lines.is_empty(), "short URL QR should fit in widget");
-        let decoded = decode_qr_lines(&lines)
+        let decoded = decode_qr_lines(&lines, false)
             .expect("Short URL QR should be decodable at widget size");
         assert_eq!(decoded, url);
     }
@@ -483,7 +554,7 @@ mod tests {
         let url = "https://debug.consolving.net/system?register=eyJzeXN0ZW1faWQiOiJiNGVhZjI1YS1lMWQ5LTQwNDgtYWRjMS0xYjc0MjdiZmQ2NjIiLCJmaW5nZXJwcmludCI6InVua25vd258MDI6NDI6YWM6MTI6MDA6MDB8MjUuNC4wIn0";
         let lines = SystemIdModule::render_qr_lines(url, 118, 18);
         if !lines.is_empty() {
-            let decoded = decode_qr_lines(&lines)
+            let decoded = decode_qr_lines(&lines, false)
                 .expect("If QR is rendered, it must be decodable");
             assert_eq!(decoded, url);
         }
@@ -498,8 +569,19 @@ mod tests {
         );
         let lines = SystemIdModule::render_qr_lines(&url, 200, 60);
         assert!(!lines.is_empty(), "render_qr_lines returned empty for full page");
-        let decoded = decode_qr_lines(&lines)
+        let decoded = decode_qr_lines(&lines, false)
             .expect("QR code with realistic payload should be decodable at full page size");
+        assert_eq!(decoded, url);
+    }
+
+    #[test]
+    fn qr_render_linux_hash_path_decodable() {
+        // Test Linux `#` rendering path
+        let url = "https://example.com/test?long";
+        let lines = SystemIdModule::render_qr_lines(url, 120, 40);
+        assert!(!lines.is_empty(), "render_qr_lines returned empty");
+        let decoded = decode_qr_lines(&lines, true)
+            .expect("Linux QR with # should be decodable");
         assert_eq!(decoded, url);
     }
 }
