@@ -27,7 +27,7 @@ deploy: release
 deploy-clean: release
 	rm -rf /tmp/sys-wall-build
 	rsync -avz --exclude='target' --exclude='.git' . legacy-dev-machine:/tmp/sys-wall-build/
-	ssh legacy-dev-root 'source $HOME/.cargo/env && cd /tmp/sys-wall-build && cargo build --release && install -m 755 /tmp/sys-wall-build/target/release/sys-wall /sbin/sys-wall && rm -rf /root/.config/sys-wall && systemctl restart sys-wall'
+	ssh legacy-dev-root "source \$$HOME/.cargo/env && cd /tmp/sys-wall-build && cargo build --release && install -m 755 /tmp/sys-wall-build/target/release/sys-wall /sbin/sys-wall && rm -rf /root/.config/sys-wall && systemctl restart sys-wall"
 
 clean:
 	cargo clean
