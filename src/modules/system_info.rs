@@ -1,7 +1,7 @@
 use crate::{Module, ModuleCapability, WidgetSize, SystemContext};
 use crossterm::event::{Event, KeyCode};
 use ratatui::prelude::{
-    Color, Line, Margin, Span, Style, Stylize, Text,
+    Color, Line, Margin, Span, Style, Text,
 };
 use ratatui::widgets::{Block, BorderType, Borders};
 
