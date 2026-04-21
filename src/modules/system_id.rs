@@ -56,8 +56,12 @@ impl SystemIdModule {
             .build()
     }
 
-    fn render_qr_compact_lines(&self, max_cols: u16, max_rows: u16) -> Vec<String> {
-        if self.qr_url.is_empty() || max_rows == 0 || max_cols == 0 {
+    /// Render the QR code into a square compact string.
+    ///
+    /// Directly samples the QR matrix with 2:1 row and column pairing
+    /// to compensate for 2:1 terminal character aspect ratio.
+    fn render_qr_compact_lines(&self, target_cols: u16, target_rows: u16) -> Vec<String> {
+        if self.qr_url.is_empty() || target_rows == 0 || target_cols == 0 {
             return Vec::new();
         }
 
@@ -66,32 +70,47 @@ impl SystemIdModule {
         });
         let colors = qr.to_colors();
         let w = qr.width() as usize;
-        if w == 0 {
+        if w == 0 || colors.is_empty() {
             return Vec::new();
         }
 
-        // Terminal chars are ~2:1 height:width.
-        // Each output row reads 2 QR rows (OR = darker wins).
-        // Scale down: if QR is wider than output area, use col_step > 1.
-        let total = max_cols.max(max_rows) as usize;
-        let step = (w.saturating_sub(1) / total.saturating_sub(1)).max(1);
-        let max_cols = max_cols as usize;
-        let max_rows = max_rows as usize;
-        let w = w as usize;
-        let mut result = Vec::new();
+        // Reserve 2 rows: one blank line + one for ID+URL text.
+        let qr_height = (target_rows as usize).saturating_sub(2);
+        let qr_width = (target_cols as usize).max(8);
 
-        for row in 0..max_rows {
-            let mut line = String::with_capacity(max_cols);
-            let qr_row_start = row.saturating_mul(step * 2);
-            for col in 0..max_cols {
-                let qc = col * step;
-                let idx_top = qr_row_start.saturating_mul(w).saturating_add(qc);
-                let idx_bot = qr_row_start.saturating_mul(w).saturating_add(w).saturating_add(qc);
-                let top_dark = idx_top < colors.len()
-                    && colors[idx_top] == qrcode::types::Color::Dark;
-                let bot_dark = idx_bot < colors.len()
-                    && colors[idx_bot] == qrcode::types::Color::Dark;
-                line.push(if top_dark || bot_dark { '█' } else { '░' });
+        if qr_height < 4 || qr_width < 4 {
+            return Vec::new();
+        }
+
+        // Each output cell = 2 matrix rows × 2 matrix cols.
+        // Terminal chars are ~2:1 tall:wide, so 2×2 pairing = square output.
+        // Compute the output size for a visually square QR.
+        let max_rows = qr_height.min(w / 2);
+        let max_cols = qr_width.min(w / 2);
+        let size = max_rows.min(max_cols);
+
+        if size < 4 {
+            return Vec::new();
+        }
+
+        let mut result = Vec::with_capacity(size);
+        for row in 0..size {
+            let mut line = String::with_capacity(size);
+            for col in 0..size {
+                let mc = col * 2;
+                let mr = row * 2;
+                // Sample a 2×2 block of the matrix, darker wins
+                let cells = [
+                    (mr, mc),
+                    (mr, mc + 1),
+                    (mr + 1, mc),
+                    (mr + 1, mc + 1),
+                ];
+                let any_dark = cells.iter().any(|(r, c)| {
+                    let idx = r.wrapping_mul(w).wrapping_add(*c);
+                    idx < colors.len() && colors[idx] == qrcode::types::Color::Dark
+                });
+                line.push(if any_dark { '\u{2588}' } else { '\u{2591}' }); // █ ░
             }
             result.push(line);
         }
@@ -157,22 +176,15 @@ impl Module for SystemIdModule {
 
         let mut lines: Vec<Line<'_>> = Vec::new();
 
-        // Compute the size for a square QR code.
-        // Terminal chars are ~2:1 height:width, so we use equal rows and columns
-        // (Dense1x2 style) which makes each output row cover 2 QR grid rows.
+        // Downsample dense QR output to fit widget dimensions.
+        // Dense1x2 chars are square in terminal (each char = 2 QR rows × 1 QR col).
         // Reserve 1 row for ID+URL text at the bottom.
-        let qr_size = inner.height.saturating_sub(2);
-        let qr_width = inner.width.saturating_sub(1);
-        let qr_dim = qr_size.min(qr_width);
-
-        if qr_dim >= 12 {
-            let qr_lines = self.render_qr_compact_lines(qr_dim, qr_dim);
-            if !qr_lines.is_empty() {
-                for qr_line in qr_lines {
-                    lines.push(Line::raw(qr_line));
-                }
-                lines.push(Line::raw(""));
+        let qr_lines = self.render_qr_compact_lines(inner.width, inner.height);
+        if !qr_lines.is_empty() {
+            for qr_line in qr_lines {
+                lines.push(Line::raw(qr_line));
             }
+            lines.push(Line::raw(""));
         }
 
         // Show system ID and URL
@@ -202,7 +214,7 @@ impl Module for SystemIdModule {
             ])
             .split(area);
 
-        // Left: QR code rendered as string blocks
+        // Left: QR code rendered as string blocks with automatic downsampling
         let block = Block::default()
             .title(" QR Code ")
             .border_type(BorderType::Rounded)
@@ -213,18 +225,18 @@ impl Module for SystemIdModule {
             vertical: 1,
             horizontal: 1,
         });
-        if inner.height > 1 && !self.qr_string.is_empty() {
-            // Parse the QR string into lines (it's already a multi-line string)
-            let qr_lines: Vec<Line<'_>> = self.qr_string
-                .lines()
-                .take(inner.height as usize)
-                .map(|line| Line::raw(line))
-                .collect();
-            let text = Text::from(qr_lines);
-            frame.render_widget(text, inner);
-        } else if inner.height > 1 {
-            let text = Text::from(vec![Line::raw(" No data yet")]);
-            frame.render_widget(text, inner);
+        if inner.height > 2 {
+            let qr_lines = self.render_qr_compact_lines(inner.width, inner.height);
+            if !qr_lines.is_empty() {
+                let qr_lines: Vec<Line<'_>> = qr_lines
+                    .into_iter()
+                    .map(Line::raw)
+                    .collect();
+                frame.render_widget(Text::from(qr_lines), inner);
+            } else {
+                let text = Text::from(vec![Line::raw(" No data yet")]);
+                frame.render_widget(text, inner);
+            }
         }
 
         // Right: detail panel
@@ -303,8 +315,6 @@ mod tests {
             "https://example.com/system",
         );
         assert!(json.contains("a/b+c=d"));
-        // Verify we can decode the payload
-        // (base64url encoding may modify the JSON slightly)
         let encoded = URL_SAFE_NO_PAD.encode(format!(r#"{{"system_id":"a/b+c=d","fingerprint":"fingerprint|data"}}"#).as_bytes());
         assert_eq!(encoded, _url.split("register=").nth(1).unwrap());
     }
