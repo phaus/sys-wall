@@ -1,6 +1,6 @@
 use crate::{Module, ModuleCapability, WidgetSize, SystemContext};
 use crossterm::event::{Event, KeyCode};
-use ratatui::prelude::{Color, Line, Margin, Rect, Span, Style, Text};
+use ratatui::prelude::{Color, Line, Margin, Rect, Span, Style, Stylize, Text};
 use ratatui::widgets::{Block, BorderType, Borders};
 use std::time::Duration;
 
@@ -12,6 +12,8 @@ pub struct SystemStatusModule {
     users: String,
     kernel: String,
     primary_mac: String,
+    system_id: String,
+    is_first_run: bool,
 }
 
 pub fn format_duration(d: Duration) -> String {
@@ -31,6 +33,8 @@ impl SystemStatusModule {
             users: "0".to_string(),
             kernel: "unknown".to_string(),
             primary_mac: "n/a".to_string(),
+            system_id: "n/a".to_string(),
+            is_first_run: false,
         }
     }
 }
@@ -65,6 +69,8 @@ impl Module for SystemStatusModule {
         self.users = count_users().to_string();
         self.kernel = ctx.kernel_version.clone();
         self.primary_mac = ctx.primary_mac.clone();
+        self.system_id = ctx.config.system_id.clone();
+        self.is_first_run = ctx.config.is_first_run;
         Ok(())
     }
 
@@ -93,6 +99,14 @@ impl Module for SystemStatusModule {
             Line::from(vec![
                 Span::styled(" mac   ", Style::default().fg(Color::Cyan)),
                 Span::styled(self.primary_mac.as_str(), Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(" id    ", Style::default().fg(Color::Yellow)),
+                Span::styled(self.system_id.as_str(), Style::default().fg(Color::White).dim()),
+            ]),
+            Line::from(vec![
+                Span::styled(" first ", Style::default().fg(Color::Green)),
+                Span::styled(format!("{}", self.is_first_run), Style::default().fg(Color::White)),
             ]),
         ]);
 

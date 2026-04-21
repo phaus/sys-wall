@@ -10,6 +10,7 @@ pub struct SystemInfoModule {
     hostname: String,
     uptime: String,
     primary_mac: String,
+    system_id: String,
     cpu_usage: String,
     cpu_cores: u16,
     ram_total: String,
@@ -32,6 +33,7 @@ impl SystemInfoModule {
             hostname: "unknown".to_string(),
             uptime: "0d 0h 0m".to_string(),
             primary_mac: "n/a".to_string(),
+            system_id: "n/a".to_string(),
             cpu_usage: "0.0%".to_string(),
             cpu_cores: 0,
             ram_total: "0 MB".to_string(),
@@ -76,6 +78,7 @@ impl Module for SystemInfoModule {
         self.hostname = ctx.hostname.clone();
         self.uptime = super::super::format_duration(ctx.uptime);
         self.primary_mac = ctx.primary_mac.clone();
+        self.system_id = ctx.config.system_id.clone();
         self.cpu_usage = format!("{:.1}%", ctx.cpu_usage);
         self.cpu_cores = ctx.cpu_per_core.len() as u16;
         self.ram_total = format_memory(ctx.memory_total);
@@ -266,7 +269,7 @@ impl Module for SystemInfoModule {
             ]),
         ];
 
-        // Widget 2: System — uptime, MAC
+        // Widget 2: System — uptime, MAC, system_id
         let system_lines: Vec<Line<'_>> = vec![
             Line::from(vec![
                 Span::styled(
@@ -286,6 +289,16 @@ impl Module for SystemInfoModule {
                 Span::styled(
                     self.primary_mac.as_str(),
                     Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    " id      ",
+                    Style::default().fg(Color::Yellow).bold(),
+                ),
+                Span::styled(
+                    self.system_id.as_str(),
+                    Style::default().fg(Color::White).dim(),
                 ),
             ]),
         ];

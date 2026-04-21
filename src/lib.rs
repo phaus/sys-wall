@@ -248,7 +248,7 @@ impl SystemContext {
             .map(|h| h.trim().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
 
-        let uuid = uuid::Uuid::new_v4().to_string();
+        let uuid = config.system_id.clone();
         let kernel = std::env::var("KERNEL_VERSION").unwrap_or_else(|_| "unknown".to_string());
         let (os_name, os_version, os_codename) = parse_os_release();
 
