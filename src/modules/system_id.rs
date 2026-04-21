@@ -70,25 +70,28 @@ impl SystemIdModule {
             return Vec::new();
         }
 
-        let mut result = Vec::new();
-        let col_step = (w as f64 / max_cols as f64).ceil() as usize;
-        let row_step = (w as f64 / max_rows as f64).ceil() as usize;
+        // Terminal chars are ~2:1 height:width.
+        // Each output row reads 2 QR rows (OR = darker wins).
+        // Scale down: if QR is wider than output area, use col_step > 1.
+        let total = max_cols.max(max_rows) as usize;
+        let step = (w.saturating_sub(1) / total.saturating_sub(1)).max(1);
         let max_cols = max_cols as usize;
         let max_rows = max_rows as usize;
+        let w = w as usize;
+        let mut result = Vec::new();
 
         for row in 0..max_rows {
             let mut line = String::with_capacity(max_cols);
-            let qr_row = row * row_step;
+            let qr_row_start = row.saturating_mul(step * 2);
             for col in 0..max_cols {
-                let qr_col = col / col_step;
-                let idx = qr_row * w + qr_col;
-                if idx < colors.len() {
-                    line.push(if colors[idx] == qrcode::types::Color::Dark {
-                        '█'
-                    } else {
-                        '░'
-                    });
-                }
+                let qc = col * step;
+                let idx_top = qr_row_start.saturating_mul(w).saturating_add(qc);
+                let idx_bot = qr_row_start.saturating_mul(w).saturating_add(w).saturating_add(qc);
+                let top_dark = idx_top < colors.len()
+                    && colors[idx_top] == qrcode::types::Color::Dark;
+                let bot_dark = idx_bot < colors.len()
+                    && colors[idx_bot] == qrcode::types::Color::Dark;
+                line.push(if top_dark || bot_dark { '█' } else { '░' });
             }
             result.push(line);
         }
@@ -154,21 +157,21 @@ impl Module for SystemIdModule {
 
         let mut lines: Vec<Line<'_>> = Vec::new();
 
-        // Check if we should render the QR code
-        // QR needs at least 6 rows to be recognizable, width >= 25 for decent horizontal detail
-        let should_show_qr = inner.height >= 8 && inner.width >= 28;
+        // Compute the size for a square QR code.
+        // Terminal chars are ~2:1 height:width, so we use equal rows and columns
+        // (Dense1x2 style) which makes each output row cover 2 QR grid rows.
+        // Reserve 1 row for ID+URL text at the bottom.
+        let qr_size = inner.height.saturating_sub(2);
+        let qr_width = inner.width.saturating_sub(1);
+        let qr_dim = qr_size.min(qr_width);
 
-        if should_show_qr {
-            let qr_rows = inner.height.saturating_sub(4); // Reserve 4 rows for text
-            let qr_width = inner.width.saturating_sub(1);
-            if qr_rows >= 4 {
-                let qr_lines = self.render_qr_compact_lines(qr_width, qr_rows);
-                if !qr_lines.is_empty() {
-                    for qr_line in qr_lines {
-                        lines.push(Line::raw(qr_line));
-                    }
-                    lines.push(Line::raw(""));
+        if qr_dim >= 12 {
+            let qr_lines = self.render_qr_compact_lines(qr_dim, qr_dim);
+            if !qr_lines.is_empty() {
+                for qr_line in qr_lines {
+                    lines.push(Line::raw(qr_line));
                 }
+                lines.push(Line::raw(""));
             }
         }
 
