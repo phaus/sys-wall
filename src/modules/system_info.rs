@@ -156,6 +156,13 @@ impl Module for SystemInfoModule {
                 Style::default().fg(Color::White),
             ),
         ]));
+        lines.push(Line::from(vec![
+            Span::styled(" sysid ", Style::default().fg(Color::Yellow).bold()),
+            Span::styled(
+                self.system_id.as_str(),
+                Style::default().fg(Color::White).dim(),
+            ),
+        ]));
         let text = ratatui::prelude::Text::from(lines);
         let block = Block::default()
             .title(format!(" {} ", "System Info"))

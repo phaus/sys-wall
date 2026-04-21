@@ -6,6 +6,8 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
+use crate::collect_kernel_version;
+
 use toml::map::Map;
 use toml::Value;
 
@@ -115,5 +117,44 @@ impl Config {
             .unwrap_or_else(|_| String::from("/tmp/sys-wall-data"));
         let dir = format!("{}/.config/sys-wall", home);
         PathBuf::from(dir)
+    }
+
+    /// Compute a fingerprint from hostname, MAC, and kernel version.
+    fn compute_fingerprint() -> String {
+        let hostname = std::fs::read_to_string("/etc/hostname")
+            .map(|h| h.trim().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+        let mac = Self::collect_hostname_iface_mac();
+        let kernel = collect_kernel_version();
+        format!("{hostname}|{mac}|{kernel}")
+    }
+
+    /// Read MAC of first non-loopback iface, used for fingerprinting.
+    fn collect_hostname_iface_mac() -> String {
+        if let Ok(dir) = fs::read_dir("/sys/class/net") {
+            for entry in dir.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == "lo" {
+                    continue;
+                }
+                if let Ok(mac) =
+                    fs::read_to_string(entry.path().join("address"))
+                {
+                    return mac.trim().to_string();
+                }
+            }
+        }
+        String::new()
+    }
+
+    /// Check if stored fingerprint differs from current.
+    fn fingerprint_changed(
+        stored: &Option<String>,
+        current: &str,
+    ) -> bool {
+        match stored {
+            Some(s) => s != current,
+            None => true, // no fingerprint stored → generate new
+        }
     }
 }

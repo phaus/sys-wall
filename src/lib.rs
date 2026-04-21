@@ -181,6 +181,35 @@ fn collect_primary_mac() -> String {
     "n/a".to_string()
 }
 
+/// Detect the actual kernel version by running `uname -r`.
+pub fn collect_kernel_version() -> String {
+    if let Ok(out) = std::process::Command::new("uname")
+        .arg("-r")
+        .output()
+    {
+        if out.status.success() {
+            return String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .to_string();
+        }
+    }
+    // Fallback: parse /proc/version
+    if let Ok(content) = std::fs::read_to_string("/proc/version") {
+        for word in content.split_whitespace() {
+            if let Some(rest) = word.strip_prefix("Linux") {
+                if !rest.is_empty() {
+                    return format!("Linux{}", rest);
+                }
+                return "Linux".to_string();
+            }
+        }
+        if content.starts_with("Linux") {
+            return "Linux".to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
 /// Detect the TTY device this process is running on.
 /// Checks /proc/self/stat for tty_nr field, falls back to service file,
 /// then to /dev/pts, and finally to a default.
@@ -249,7 +278,7 @@ impl SystemContext {
             .unwrap_or_else(|_| "unknown".to_string());
 
         let uuid = config.system_id.clone();
-        let kernel = std::env::var("KERNEL_VERSION").unwrap_or_else(|_| "unknown".to_string());
+        let kernel = collect_kernel_version();
         let (os_name, os_version, os_codename) = parse_os_release();
 
         // Refresh shared sysinfo for live CPU, memory, uptime, process count.
