@@ -42,7 +42,11 @@ impl Module for NetworkModule {
     }
 
     fn widget_size(&self) -> WidgetSize {
-        WidgetSize::Medium
+        WidgetSize::Large
+    }
+
+    fn widget_height(&self) -> u16 {
+        22
     }
 
     fn update(&mut self, ctx: &SystemContext) -> Result<(), Box<dyn std::error::Error>> {
@@ -114,7 +118,7 @@ impl Module for NetworkModule {
         frame.render_widget(
             text,
             area.inner(Margin {
-                vertical: 0,
+                vertical: 1,
                 horizontal: 1,
             }),
         );

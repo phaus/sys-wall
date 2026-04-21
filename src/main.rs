@@ -1,6 +1,6 @@
 use sys_wall::config::Config;
 use sys_wall::modules;
-use sys_wall::{Module, ModuleCapability, WidgetSize};
+use sys_wall::{Module, ModuleCapability};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -9,18 +9,9 @@ use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::prelude::Stylize;
 use ratatui::Terminal;
-use std::io;
+use std::io::{self, Write};
 
 const TICK_RATE_MS: u64 = 1000;
-
-/// Widget height for a given WidgetSize.
-fn widget_height(size: WidgetSize) -> u16 {
-    match size {
-        WidgetSize::Small => 5,
-        WidgetSize::Medium => 8,
-        WidgetSize::Large => 12,
-    }
-}
 
 /// Get the list of (index, name) tuples for page-capable modules.
 fn page_module_list(modules: &[std::boxed::Box<dyn Module>]) -> Vec<(usize, String)> {
@@ -37,7 +28,13 @@ fn page_module_list(modules: &[std::boxed::Box<dyn Module>]) -> Vec<(usize, Stri
         .collect()
 }
 
+fn clear_framebuffer() {
+    let _ = io::stdout().write_all(b"\x1b[2J\x1b[H");
+    let _ = io::stdout().flush();
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    clear_framebuffer();
     let config = Config::load()?;
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -75,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     matches!(
                         m.capability(),
                         ModuleCapability::WidgetAndPage | ModuleCapability::PageOnly | ModuleCapability::WidgetOnly
-                    )
+                    ) && m.name() != "Dashboard"
                 })
                 .map(|m| m.as_ref())
                 .collect();
@@ -95,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut max_h: u16 = 0;
                     for _ in 0..widgets_per_row {
                         if idx < widget_modules.len() as u16 {
-                            let h = widget_height(widget_modules[idx as usize].widget_size());
+                            let h = widget_modules[idx as usize].widget_height();
                             if h > max_h {
                                 max_h = h.max(4);
                             }

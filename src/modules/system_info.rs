@@ -163,7 +163,7 @@ impl Module for SystemInfoModule {
         frame.render_widget(
             text,
             area.inner(Margin {
-                vertical: 0,
+                vertical: 1,
                 horizontal: 1,
             }),
         );

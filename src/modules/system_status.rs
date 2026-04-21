@@ -11,6 +11,7 @@ pub struct SystemStatusModule {
     uptime: String,
     users: String,
     kernel: String,
+    primary_mac: String,
 }
 
 pub fn format_duration(d: Duration) -> String {
@@ -29,6 +30,7 @@ impl SystemStatusModule {
             uptime: "0d 0h 0m".to_string(),
             users: "0".to_string(),
             kernel: "unknown".to_string(),
+            primary_mac: "n/a".to_string(),
         }
     }
 }
@@ -62,6 +64,7 @@ impl Module for SystemStatusModule {
         self.uptime = format_duration(ctx.uptime);
         self.users = count_users().to_string();
         self.kernel = ctx.kernel_version.clone();
+        self.primary_mac = ctx.primary_mac.clone();
         Ok(())
     }
 
@@ -86,6 +89,10 @@ impl Module for SystemStatusModule {
             Line::from(vec![
                 Span::styled(" kernel ", Style::default().fg(Color::Cyan)),
                 Span::styled(self.kernel.as_str(), Style::default().fg(Color::White)),
+            ]),
+            Line::from(vec![
+                Span::styled(" mac   ", Style::default().fg(Color::Cyan)),
+                Span::styled(self.primary_mac.as_str(), Style::default().fg(Color::White)),
             ]),
         ]);
 
