@@ -113,8 +113,17 @@ impl Config {
 
     /// Return `$HOME/.config/sys-wall/`.
     fn config_dir() -> PathBuf {
-        let home = std::env::var("HOME")
-            .unwrap_or_else(|_| String::from("/tmp/sys-wall-data"));
+        let home = std::env::var("HOME").unwrap_or_else(|_| {
+            // When running as root (systemd service), default to /root
+            std::fs::read_to_string("/proc/self/loginuid")
+                .map(|uid| {
+                    if uid.trim() == "0" {
+                        return "/root".to_string();
+                    }
+                    String::from("/tmp/sys-wall-data")
+                })
+                .unwrap_or_else(|_| String::from("/tmp/sys-wall-data"))
+        });
         let dir = format!("{}/.config/sys-wall", home);
         PathBuf::from(dir)
     }
