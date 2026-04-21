@@ -29,7 +29,6 @@ impl Config {
 
         let config_path = config_dir.join("config.toml");
         let mut is_first_run = !config_path.exists();
-        let mut system_id_set = false;
 
         // Defaults
         let mut refresh_interval_ms = DEFAULT_REFRESH_INTERVAL_MS;
@@ -44,10 +43,15 @@ impl Config {
             Value::Table(Map::new())
         };
 
+        // Extract fingerprint from existing config.
+        let parsed_fingerprint: Option<String> = parsed
+            .get("fingerprint")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         // Extract system_id (top-level key).
         if let Some(sid) = parsed.get("system_id").and_then(|v| v.as_str()) {
             system_id = sid.to_string();
-            system_id_set = true;
         }
 
         // Extract general section.
@@ -77,17 +81,24 @@ impl Config {
             default_tab = val;
         }
 
-        // Generate UUID when missing.
-        if !system_id_set {
+        // Compute current hardware fingerprint.
+        let current_fingerprint = Self::compute_fingerprint();
+
+        // Check if fingerprint changed → regenerate UUID.
+        if Self::fingerprint_changed(&parsed_fingerprint, &current_fingerprint) {
             system_id = uuid::Uuid::new_v4().to_string();
             is_first_run = true;
         }
 
-        // Persist (new file or on every load for correctness).
+        // Persist with fingerprint.
         let mut table = Map::new();
         table.insert(
             "system_id".into(),
             Value::String(system_id.clone()),
+        );
+        table.insert(
+            "fingerprint".into(),
+            Value::String(current_fingerprint.clone()),
         );
 
         let mut general = Map::new();
