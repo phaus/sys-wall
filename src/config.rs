@@ -12,6 +12,7 @@ use toml::map::Map;
 use toml::Value;
 
 const DEFAULT_REFRESH_INTERVAL_MS: u64 = 1000;
+const DEFAULT_SYSTEM_URL: &str = "https://debug.consolving.net/system";
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -20,6 +21,7 @@ pub struct Config {
     pub is_first_run: bool,
     pub refresh_interval_ms: u64,
     pub default_tab: String,
+    pub system_url: String,
 }
 
 impl Config {
@@ -34,6 +36,7 @@ impl Config {
         let mut refresh_interval_ms = DEFAULT_REFRESH_INTERVAL_MS;
         let mut default_tab = String::from("summary");
         let mut system_id = String::new();
+        let system_url = Self::load_system_url();
 
         // Parse existing config if present.
         let parsed: Value = if config_path.exists() {
@@ -119,6 +122,7 @@ impl Config {
             is_first_run,
             refresh_interval_ms,
             default_tab,
+            system_url,
         })
     }
 
@@ -164,8 +168,68 @@ impl Config {
                 }
              }
          }
-         String::new()
-     }
+          String::new()
+      }
+
+    /// Load system_url from sysid.toml config file.
+    /// Creates the file if it doesn't exist, always persists the current URL.
+    fn load_system_url() -> String {
+        let config_dir = Self::config_dir();
+        let _ = fs::create_dir_all(&config_dir);
+        let config_path = config_dir.join("sysid.toml");
+
+        // Environment variable override
+        if let Ok(val) = std::env::var("SYSWALL_SYSTEM_URL") {
+            if !val.is_empty() {
+                let _ = Self::write_sysid_config(&config_path, &val);
+                return val;
+            }
+        }
+
+        let mut url = String::from(DEFAULT_SYSTEM_URL);
+
+        // Check /etc/sys-wall/sysid.toml first (system-level config, highest precedence)
+        let etc_path = PathBuf::from("/etc/sys-wall/sysid.toml");
+        if etc_path.exists() {
+            if let Ok(content) = fs::read_to_string(&etc_path) {
+                if let Ok(parsed) = content.parse::<toml::Value>() {
+                    if let Some(s) = parsed.get("system_url").and_then(|v| v.as_str()) {
+                        if !s.is_empty() {
+                            url = s.to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to user config dir (overwrites system config if user sets one)
+        if config_path.exists() {
+            if let Ok(content) = fs::read_to_string(&config_path) {
+                if let Ok(parsed) = content.parse::<toml::Value>() {
+                    if let Some(s) = parsed.get("system_url").and_then(|v| v.as_str()) {
+                        if !s.is_empty() {
+                            url = s.to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Always persist (creates file if missing, updates if changed)
+        let _ = Self::write_sysid_config(&config_path, &url);
+        url
+    }
+
+    /// Write the sysid.toml config file. Returns Ok on success, ignores errors.
+    fn write_sysid_config(config_path: &PathBuf, system_url: &str) {
+        let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let mut table = toml::map::Map::new();
+            table.insert("system_url".into(), toml::Value::String(system_url.to_string()));
+            let output = toml::to_string_pretty(&toml::Value::Table(table))?;
+            fs::write(config_path, output)?;
+            Ok(())
+        })();
+    }
 }
 
 /// Check if stored fingerprint differs from current hardware fingerprint.

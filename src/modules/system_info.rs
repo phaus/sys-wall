@@ -192,7 +192,7 @@ impl Module for SystemInfoModule {
             .split(area);
 
         // Left column: all system data (merged from former Info + System widgets)
-        let mut all_lines: Vec<Line<'_>> = vec![
+        let all_lines: Vec<Line<'_>> = vec![
             Line::from(vec![
                 Span::styled(
                     " hostname ",

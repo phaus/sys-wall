@@ -1,6 +1,6 @@
 use crate::{Module, ModuleCapability, WidgetSize, SystemContext};
 use crossterm::event::{Event, KeyCode};
-use ratatui::prelude::{Color, Line, Margin, Span, Style, Stylize, Text};
+use ratatui::prelude::{Color, Line, Margin, Span, Style, Text};
 use ratatui::widgets::{Block, BorderType, Borders};
 
 /// The Dashboard module serves as the default landing page.

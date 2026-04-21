@@ -34,6 +34,7 @@ pub struct SystemContext {
     pub ipv6_gateway: String,
     pub dns_servers: Vec<String>,
     pub tty_path: String,
+    pub system_url: String,
     pub config: std::sync::Arc<Config>,
 }
 
@@ -376,6 +377,7 @@ impl SystemContext {
         let dns_servers = collect_dns_servers();
         let primary_mac = collect_primary_mac();
         let tty_path = detect_tty();
+        let system_url = config.system_url.clone();
 
         Self {
             hostname,
@@ -398,6 +400,7 @@ impl SystemContext {
             ipv6_gateway,
             dns_servers,
             tty_path,
+            system_url,
         }
     }
 }

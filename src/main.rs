@@ -7,7 +7,7 @@ use crossterm::terminal::{
 };
 use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
-use ratatui::prelude::Stylize;
+
 use ratatui::Terminal;
 use std::io::{self, Write};
 
@@ -158,6 +158,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Char('3') => {
                             if page_count > 2 {
                                 current_page = 2;
+                            }
+                        }
+                        KeyCode::Char('4') => {
+                            if page_count > 3 {
+                                current_page = 3;
                             }
                         }
                         _ => {}

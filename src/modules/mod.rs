@@ -1,10 +1,12 @@
 pub mod dashboard;
 pub mod network;
 pub mod system_info;
+pub mod system_id;
 
 use crate::modules::dashboard::DashboardModule;
 use crate::modules::network::NetworkModule;
 use crate::modules::system_info::SystemInfoModule;
+use crate::modules::system_id::SystemIdModule;
 use crate::Module;
 
 pub fn register_modules() -> Vec<Box<dyn Module>> {
@@ -12,5 +14,6 @@ pub fn register_modules() -> Vec<Box<dyn Module>> {
     modules.push(Box::new(DashboardModule::new()));
     modules.push(Box::new(SystemInfoModule::new()));
     modules.push(Box::new(NetworkModule::new()));
+    modules.push(Box::new(SystemIdModule::new()));
     modules
 }
