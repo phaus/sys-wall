@@ -79,10 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if !widget_modules.is_empty() {
                 let mut widgets_per_row: u16 = 1;
-                if main_area.width >= 46 {
-                    widgets_per_row = main_area.width / 46;
-                    if widgets_per_row > 4 {
-                        widgets_per_row = 4;
+                if main_area.width >= 46 * 2 {
+                    widgets_per_row = (main_area.width / 46).min(3);
+                    if widgets_per_row < 2 {
+                        widgets_per_row = 2;
                     }
                 }
 

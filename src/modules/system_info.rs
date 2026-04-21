@@ -182,18 +182,17 @@ impl Module for SystemInfoModule {
     fn render_page(&self, frame: &mut ratatui::Frame<'_>, area: ratatui::layout::Rect) {
         use ratatui::layout::{Constraint, Direction, Layout};
 
-        // 3 equal-width columns regardless of terminal size
+        // Two columns: System Info (left) | Network (right)
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
-                Constraint::Ratio(1, 3),
+                Constraint::Ratio(2, 3),
             ])
             .split(area);
 
-        // Widget 1: Info — hostname, TTY, CPU, MEM, processes, kernel, OS
-        let info_lines: Vec<Line<'_>> = vec![
+        // Left column: all system data (merged from former Info + System widgets)
+        let mut all_lines: Vec<Line<'_>> = vec![
             Line::from(vec![
                 Span::styled(
                     " hostname ",
@@ -206,17 +205,57 @@ impl Module for SystemInfoModule {
             ]),
             Line::from(vec![
                 Span::styled(
-                    " tty   ",
+                    " version ",
                     Style::default().fg(Color::Cyan).bold(),
                 ),
                 Span::styled(
-                    self.tty_path.as_str(),
+                    "v0.1.0",
                     Style::default().fg(Color::White),
                 ),
             ]),
             Line::from(vec![
                 Span::styled(
-                    " CPU   ",
+                    " uptime ",
+                    Style::default().fg(Color::Cyan).bold(),
+                ),
+                Span::styled(
+                    self.uptime.as_str(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    " OS     ",
+                    Style::default().fg(Color::Cyan).bold(),
+                ),
+                Span::styled(
+                    self.os.as_str(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    " kernel ",
+                    Style::default().fg(Color::Cyan).bold(),
+                ),
+                Span::styled(
+                    self.kernel.as_str(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    " mac    ",
+                    Style::default().fg(Color::Cyan).bold(),
+                ),
+                Span::styled(
+                    self.primary_mac.as_str(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    " CPU    ",
                     Style::default().fg(Color::Cyan).bold(),
                 ),
                 Span::styled(
@@ -256,51 +295,7 @@ impl Module for SystemInfoModule {
             ]),
             Line::from(vec![
                 Span::styled(
-                    " Kernel  ",
-                    Style::default().fg(Color::Cyan).bold(),
-                ),
-                Span::styled(
-                    self.kernel.as_str(),
-                    Style::default().fg(Color::White),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    " System  ",
-                    Style::default().fg(Color::Cyan).bold(),
-                ),
-                Span::styled(
-                    self.os.as_str(),
-                    Style::default().fg(Color::White),
-                ),
-            ]),
-        ];
-
-        // Widget 2: System — uptime, MAC, system_id
-        let system_lines: Vec<Line<'_>> = vec![
-            Line::from(vec![
-                Span::styled(
-                    " uptime  ",
-                    Style::default().fg(Color::Cyan).bold(),
-                ),
-                Span::styled(
-                    self.uptime.as_str(),
-                    Style::default().fg(Color::White),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    " mac     ",
-                    Style::default().fg(Color::Cyan).bold(),
-                ),
-                Span::styled(
-                    self.primary_mac.as_str(),
-                    Style::default().fg(Color::White),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled(
-                    " id      ",
+                    " sysid  ",
                     Style::default().fg(Color::Yellow).bold(),
                 ),
                 Span::styled(
@@ -310,23 +305,23 @@ impl Module for SystemInfoModule {
             ]),
         ];
 
-        // Widget 3: Network — IPs, gateways, DNS
+        // Right column: Network data
         let mut network_lines: Vec<Line<'_>> = Vec::new();
         if self.ips.is_empty() {
             network_lines.push(Line::from(vec![
-                Span::styled(" ip    ", Style::default().fg(Color::Cyan).bold()),
+                Span::styled(" ip    ", Style::default().fg(Color::Magenta).bold()),
                 Span::styled("n/a", Style::default().fg(Color::Gray)),
             ]));
         } else {
             for ip in &self.ips {
                 network_lines.push(Line::from(vec![
-                    Span::styled(" ip    ", Style::default().fg(Color::Cyan).bold()),
+                    Span::styled(" ip    ", Style::default().fg(Color::Magenta).bold()),
                     Span::styled(ip, Style::default().fg(Color::White)),
                 ]));
             }
         }
         network_lines.push(Line::from(vec![
-            Span::styled(" v4gw  ", Style::default().fg(Color::Cyan).bold()),
+            Span::styled(" v4gw  ", Style::default().fg(Color::Magenta).bold()),
             if self.ipv4_gateway.is_empty() {
                 Span::styled("n/a", Style::default().fg(Color::Gray))
             } else {
@@ -337,7 +332,7 @@ impl Module for SystemInfoModule {
             },
         ]));
         network_lines.push(Line::from(vec![
-            Span::styled(" v6gw  ", Style::default().fg(Color::Cyan).bold()),
+            Span::styled(" v6gw  ", Style::default().fg(Color::Magenta).bold()),
             if self.ipv6_gateway.is_empty() {
                 Span::styled("n/a", Style::default().fg(Color::Gray))
             } else {
@@ -349,45 +344,36 @@ impl Module for SystemInfoModule {
         ]));
         if self.dns_servers.is_empty() {
             network_lines.push(Line::from(vec![
-                Span::styled(" dns   ", Style::default().fg(Color::Cyan).bold()),
+                Span::styled(" dns   ", Style::default().fg(Color::Magenta).bold()),
                 Span::styled("n/a", Style::default().fg(Color::Gray)),
             ]));
         } else {
             for dns in &self.dns_servers {
                 network_lines.push(Line::from(vec![
-                    Span::styled(" dns   ", Style::default().fg(Color::Cyan).bold()),
+                    Span::styled(" dns   ", Style::default().fg(Color::Magenta).bold()),
                     Span::styled(dns, Style::default().fg(Color::White)),
                 ]));
             }
         }
 
-        // Render 3 widgets side by side
+        // Render 2 columns
         frame.render_widget(
             Block::default()
-                .title(format!(" {} ", "Info"))
+                .title(format!(" {} ", "System Info"))
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow)),
             chunks[0],
         );
-        frame.render_widget(Text::from(info_lines), chunks[0].inner(Margin::default()));
-
-        frame.render_widget(
-            Block::default()
-                .title(format!(" {} ", "System"))
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow)),
-            chunks[1],
-        );
-        frame.render_widget(Text::from(system_lines), chunks[1].inner(Margin::default()));
+        frame.render_widget(Text::from(all_lines), chunks[0].inner(Margin::default()));
 
         frame.render_widget(
             Block::default()
                 .title(format!(" {} ", "Network"))
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow)),
-            chunks[2],
+            chunks[1],
         );
-        frame.render_widget(Text::from(network_lines), chunks[2].inner(Margin::default()));
+        frame.render_widget(Text::from(network_lines), chunks[1].inner(Margin::default()));
     }
 
     fn handle_input(&mut self, _event: &Event) -> Result<bool, Box<dyn std::error::Error>> {
