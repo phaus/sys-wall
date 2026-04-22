@@ -2,6 +2,11 @@
 
 A lightweight, statically-linked TUI dashboard for Linux systems, designed to run directly on the framebuffer console at boot. Inspired by the [Talos OS](https://www.talos.dev/) console dashboard.
 
+## Screenshots
+
+![Dashboard](screenshots/2.png)
+![QR Code Registration](screenshots/1.png)
+
 ## Overview
 
 sys-wall provides a system information dashboard that starts automatically when a Linux machine boots. It displays system status, resource monitoring, and network configuration — all in a terminal UI with no desktop environment required.
