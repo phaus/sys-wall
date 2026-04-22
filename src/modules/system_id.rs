@@ -80,17 +80,16 @@ impl SystemIdModule {
         let colors = qr.to_colors();
         let size = qr.width() as usize;
 
-        let needed_cols = size;
-        let needed_rows = size;
-        if needed_cols > target_cols as usize || needed_rows > target_rows as usize {
-            return Vec::new();
-        }
-
         // On macOS (non-Linux), use half-block characters for proper 1:1 QR aspect ratio.
         // Linux uses `#` + space (FB rendering handles pixel-perfect QR separately).
         let is_linux = std::env::var("TERM").unwrap_or_default() == "linux";
 
         if is_linux {
+            let needed_cols = size;
+            let needed_rows = size;
+            if needed_cols > target_cols as usize || needed_rows > target_rows as usize {
+                return Vec::new();
+            }
             let mut result = Vec::new();
             for row in 0..size {
                 let mut chars = String::with_capacity(size);
@@ -107,32 +106,47 @@ impl SystemIdModule {
             result
         } else {
             // macOS / other: half-block characters give square QR (2:1 vertical compensation)
-            let bg = Color::White;
+            // Add a quiet zone (whitespace border) around the QR for reliable scanning.
+            let quiet = 4usize; // QR spec: 4-module quiet zone
+            let total_cols = size + quiet * 2;
+            let total_rows_half = (size + quiet * 2 + 1) / 2; // half-block packs 2 rows per line
+
+            if total_cols > target_cols as usize || total_rows_half > target_rows as usize {
+                return Vec::new();
+            }
+
+            let dark_style = Style::default().fg(Color::Black).bg(Color::White);
+            let light_style = Style::default().bg(Color::White);
             let mut result = Vec::new();
 
-            for row in (0..size).step_by(2) {
-                let has_bot = row + 1 < size;
+            let total_h = size + quiet * 2;
+            for row in (0..total_h).step_by(2) {
+                let has_bot = row + 1 < total_h;
                 let mut spans: Vec<Span<'static>> = Vec::new();
 
-                for col in 0..size {
-                    let top = colors[row * size + col] == qrcode::Color::Dark;
-                    let bot = if has_bot {
-                        colors[(row + 1) * size + col] == qrcode::Color::Dark
-                    } else {
-                        false
-                    };
+                for col in 0..total_cols {
+                    let in_qr_col = col >= quiet && col < quiet + size;
+                    let in_qr_row_top = row >= quiet && row < quiet + size;
+                    let in_qr_row_bot = has_bot && (row + 1) >= quiet && (row + 1) < quiet + size;
+
+                    let top = in_qr_col && in_qr_row_top
+                        && colors[(row - quiet) * size + (col - quiet)] == qrcode::Color::Dark;
+                    let bot = in_qr_col && in_qr_row_bot
+                        && colors[(row + 1 - quiet) * size + (col - quiet)] == qrcode::Color::Dark;
+
                     let ch = match (top, bot) {
                         (true, true) => '\u{2588}',  // █ dark/dark
                         (true, false) => '\u{2580}', // ▀ dark/light (top dark)
                         (false, true) => '\u{2584}', // ▄ light/dark (bottom dark)
                         (false, false) => ' ',
                     };
-                    spans.push(Span::styled(ch.to_string(), Style::default().bg(bg)));
+                    let style = if top || bot { dark_style } else { light_style };
+                    spans.push(Span::styled(ch.to_string(), style));
                 }
 
-                let padding = target_cols as usize - size;
+                let padding = target_cols as usize - total_cols;
                 if padding > 0 {
-                    spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
+                    spans.push(Span::styled(" ".repeat(padding), light_style));
                 }
 
                 result.push(Line::from(spans));
