@@ -1,6 +1,6 @@
 use crate::{Module, ModuleCapability, WidgetSize, SystemContext};
 use crossterm::event::{Event, KeyCode};
-use ratatui::prelude::{Color, Line, Margin, Span, Style, Stylize, Text};
+use ratatui::prelude::{Color, Line, Margin, Span, Style, Text};
 use ratatui::widgets::{Block, BorderType, Borders};
 
 /// The Dashboard module serves as the default landing page.
@@ -32,7 +32,7 @@ impl Module for DashboardModule {
     }
 
     fn keybinding(&self) -> Option<KeyCode> {
-        Some(KeyCode::Char('1'))
+        Some(KeyCode::Char('2'))
     }
 
     fn capability(&self) -> ModuleCapability {

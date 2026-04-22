@@ -7,7 +7,7 @@ use crossterm::terminal::{
 };
 use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
-use ratatui::prelude::Stylize;
+
 use ratatui::Terminal;
 use std::io::{self, Write};
 
@@ -44,13 +44,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut modules = modules::register_modules();
 
-    // Build a static list of page names (used only for keyboard switching)
-    let page_names: Vec<String> = {
-        let list = page_module_list(&modules);
-        list.into_iter().map(|(_, nm)| nm).collect()
-    };
-    let page_count = page_names.len();
-
     let mut current_page: usize = 0;
 
     loop {
@@ -60,74 +53,105 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = module.update(&ctx);
         }
 
+        // Rebuild page list each frame (capabilities may change dynamically)
+        let page_names: Vec<String> = {
+            let list = page_module_list(&modules);
+            list.into_iter().map(|(_, nm)| nm).collect()
+        };
+        let page_count = page_names.len();
+
+        // Clamp current_page if pages disappeared
+        if current_page >= page_count && page_count > 0 {
+            current_page = 0;
+        }
+
         terminal.draw(|frame| {
             let area = frame.area();
             let tab_y = area.height.saturating_sub(1);
             let main_area = ratatui::layout::Rect::new(0, 0, area.width, tab_y);
 
-            // Render all widgets as a grid on the Dashboard page
-            let widget_modules: Vec<_> = modules
-                .iter()
-                .filter(|m| {
-                    matches!(
-                        m.capability(),
-                        ModuleCapability::WidgetAndPage | ModuleCapability::PageOnly | ModuleCapability::WidgetOnly
-                    ) && m.name() != "Dashboard"
-                })
-                .map(|m| m.as_ref())
-                .collect();
+            // Determine if current page is the Dashboard (widget grid)
+            let is_dashboard = page_names.get(current_page).map(|n| n == "Dashboard").unwrap_or(false);
 
-            if !widget_modules.is_empty() {
-                let mut widgets_per_row: u16 = 1;
-                if main_area.width >= 46 {
-                    widgets_per_row = main_area.width / 46;
-                    if widgets_per_row > 4 {
-                        widgets_per_row = 4;
+            if is_dashboard {
+                // Render all widgets as a grid on the Dashboard page
+                let widget_modules: Vec<_> = modules
+                    .iter()
+                    .filter(|m| {
+                        matches!(
+                            m.capability(),
+                            ModuleCapability::WidgetAndPage | ModuleCapability::PageOnly | ModuleCapability::WidgetOnly
+                        ) && m.name() != "Dashboard"
+                    })
+                    .map(|m| m.as_ref())
+                    .collect();
+
+                if !widget_modules.is_empty() {
+                    let mut widgets_per_row: u16 = 1;
+                    if main_area.width >= 46 * 2 {
+                        widgets_per_row = (main_area.width / 46).min(3);
+                        if widgets_per_row < 2 {
+                            widgets_per_row = 2;
+                        }
                     }
-                }
 
-                let mut row_heights: Vec<u16> = Vec::new();
-                let mut idx: u16 = 0;
-                while idx < widget_modules.len() as u16 {
-                    let mut max_h: u16 = 0;
-                    for _ in 0..widgets_per_row {
-                        if idx < widget_modules.len() as u16 {
-                            let h = widget_modules[idx as usize].widget_height();
-                            if h > max_h {
-                                max_h = h.max(4);
+                    let mut row_heights: Vec<u16> = Vec::new();
+                    let mut idx: u16 = 0;
+                    while idx < widget_modules.len() as u16 {
+                        let mut max_h: u16 = 0;
+                        for _ in 0..widgets_per_row {
+                            if idx < widget_modules.len() as u16 {
+                                let h = widget_modules[idx as usize].widget_height();
+                                if h > max_h {
+                                    max_h = h.max(4);
+                                }
+                                idx += 1;
                             }
-                            idx += 1;
+                        }
+                        row_heights.push(max_h.max(4));
+                    }
+
+                    let layout = ratatui::layout::Layout::default()
+                        .direction(ratatui::layout::Direction::Vertical)
+                        .constraints(
+                            row_heights
+                                .iter()
+                                .map(|h| ratatui::layout::Constraint::Length(*h))
+                                .collect::<Vec<_>>(),
+                        );
+
+                    let regions = layout.split(main_area);
+
+                    let mut cell: u16 = 0;
+                    for region in regions.iter() {
+                        for col in 0..widgets_per_row {
+                            if cell < widget_modules.len() as u16 {
+                                let cell_w = region.width / widgets_per_row;
+                                let cell_area = ratatui::layout::Rect::new(
+                                    region.left() + col * cell_w,
+                                    region.top(),
+                                    cell_w.max(1),
+                                    region.height.max(1),
+                                );
+                                widget_modules[cell as usize].render_widget(frame, cell_area);
+                                cell += 1;
+                            }
                         }
                     }
-                    row_heights.push(max_h.max(4));
                 }
-
-                let layout = ratatui::layout::Layout::default()
-                    .direction(ratatui::layout::Direction::Vertical)
-                    .constraints(
-                        row_heights
-                            .iter()
-                            .map(|h| ratatui::layout::Constraint::Length(*h))
-                            .collect::<Vec<_>>(),
-                    );
-
-                let regions = layout.split(main_area);
-
-                let mut cell: u16 = 0;
-                for region in regions.iter() {
-                    for col in 0..widgets_per_row {
-                        if cell < widget_modules.len() as u16 {
-                            let cell_w = region.width / widgets_per_row;
-                            let cell_area = ratatui::layout::Rect::new(
-                                region.left() + col * cell_w,
-                                region.top(),
-                                cell_w.max(1),
-                                region.height.max(1),
-                            );
-                            widget_modules[cell as usize].render_widget(frame, cell_area);
-                            cell += 1;
-                        }
-                    }
+            } else {
+                // Render the selected module's full page
+                let page_modules: Vec<_> = modules
+                    .iter()
+                    .filter(|m| {
+                        matches!(
+                            m.capability(),
+                            ModuleCapability::WidgetAndPage | ModuleCapability::PageOnly
+                        )
+                    })
+                    .collect();
+                if let Some(module) = page_modules.get(current_page) {
+                    module.render_page(frame, main_area);
                 }
             }
 
@@ -158,6 +182,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Char('3') => {
                             if page_count > 2 {
                                 current_page = 2;
+                            }
+                        }
+                        KeyCode::Char('4') => {
+                            if page_count > 3 {
+                                current_page = 3;
                             }
                         }
                         _ => {}

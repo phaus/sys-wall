@@ -1,6 +1,6 @@
 use crate::{Module, ModuleCapability, WidgetSize, SystemContext};
 use crossterm::event::{Event, KeyCode};
-use ratatui::prelude::{Color, Line, Margin, Span, Style, Stylize, Text};
+use ratatui::prelude::{Color, Line, Margin, Span, Style, Text};
 use ratatui::widgets::{Block, BorderType, Borders};
 
 /// Network module — shows IPs one per line, default gateways, DNS servers.
@@ -34,7 +34,7 @@ impl Module for NetworkModule {
     }
 
     fn keybinding(&self) -> Option<KeyCode> {
-        Some(KeyCode::Char('3'))
+        None
     }
 
     fn capability(&self) -> ModuleCapability {
